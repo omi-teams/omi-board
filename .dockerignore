@@ -1,0 +1,10 @@
+.git
+.cache
+.env
+.env.*
+!.env.example
+**/node_modules
+web/.next
+docs
+*.md
+.omi-cache
