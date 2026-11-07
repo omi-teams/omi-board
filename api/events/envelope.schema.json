@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WebSocket event envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["seq", "type", "data"],
+  "properties": {
+    "seq": {"type": "integer", "minimum": 0},
+    "type": {"type": "string", "minLength": 1},
+    "project_id": {"type": "string"},
+    "ticket_id": {"type": "string"},
+    "data": {"type": "object"}
+  }
+}
