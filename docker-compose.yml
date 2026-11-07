@@ -23,7 +23,7 @@ services:
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789}
     ports:
-      - "8080:8080"
+      - "8080:${PORT:-8080}"
   web:
     build:
       context: .

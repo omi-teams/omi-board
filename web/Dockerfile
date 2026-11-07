@@ -1,5 +1,5 @@
 # Build with the repo root as context: docker build -f web/Dockerfile .
-FROM node:24.11.0-slim AS build
+FROM node:24.11.0-slim@sha256:76d0ed0ed93bed4f4376211e9d8fddac4d8b3fbdb54cc45955696001a3c91152 AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY web/package.json web/package-lock.json ./
@@ -7,7 +7,7 @@ RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
-FROM node:24.11.0-slim
+FROM node:24.11.0-slim@sha256:76d0ed0ed93bed4f4376211e9d8fddac4d8b3fbdb54cc45955696001a3c91152
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3000 HOSTNAME=0.0.0.0
 COPY --from=build --chown=node:node /app/.next/standalone ./

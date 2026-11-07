@@ -15,6 +15,7 @@ export GOPATH="${GOPATH:-$CACHE/gopath}"
 export NEXT_TELEMETRY_DISABLED=1
 export npm_config_cache="${npm_config_cache:-$CACHE/npm}"
 mkdir -p "$GOTMPDIR" "$GOCACHE" "$GOPATH" "$npm_config_cache"
+sh "$ROOT/scripts/test-ops.sh"
 
 PGDIR=""
 cleanup() {
@@ -23,7 +24,9 @@ cleanup() {
 		rm -rf "$PGDIR"
 	fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if [ -z "${DATABASE_URL:-}" ]; then
 	PGDIR=$(mktemp -d)
