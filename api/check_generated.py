@@ -1,5 +1,6 @@
 """Regenerate and compare bytes, including an intentional spec-drift regression."""
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -12,8 +13,14 @@ OUTPUTS = [ROOT / name for name in (
 
 
 def generate():
-    subprocess.run(['go', 'generate', './...'], cwd=ROOT / 'server', check=True)
-    subprocess.run(['npm', 'run', 'gen'], cwd=ROOT / 'web', check=True)
+    tools = {}
+    for name in ('go', 'npm'):
+        executable = shutil.which(name)
+        if executable is None:
+            raise SystemExit('Required tool not found on PATH: ' + name)
+        tools[name] = executable
+    subprocess.run([tools['go'], 'generate', './...'], cwd=ROOT / 'server', check=True)
+    subprocess.run([tools['npm'], 'run', 'gen'], cwd=ROOT / 'web', check=True)
 
 
 def check():
