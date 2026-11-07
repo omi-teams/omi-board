@@ -42,3 +42,20 @@ func TestGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestRejectModelNamesShadowingBuiltins(t *testing.T) {
+	spec, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"dict", "isinstance", "super", "float"} {
+		t.Run(name, func(t *testing.T) {
+			renamed := strings.ReplaceAll(string(spec), "#/components/schemas/Health", "#/components/schemas/"+name)
+			renamed = strings.Replace(renamed, "    Health:", "    "+name+":", 1)
+			_, err := generate([]byte(renamed))
+			if err == nil || err.Error() != "unsupported model \""+name+"\"" {
+				t.Fatalf("expected conflicting model name to be rejected, got %v", err)
+			}
+		})
+	}
+}

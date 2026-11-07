@@ -99,7 +99,7 @@ func generate(data []byte) ([]byte, error) {
 	b.WriteString(preamble)
 	for _, name := range keys(d.Components.Schemas) {
 		s := d.Components.Schemas[name]
-		if !validName(name) || strings.Contains(" Client ProblemError dataclass fields json Optional Union get_args get_origin HTTPError Request urlopen str int bool type ValueError Exception ", " "+name+" ") || s.Type != "object" || s.Ref != "" || s.AdditionalProperties == nil || *s.AdditionalProperties || len(s.Properties) == 0 {
+		if !validName(name) || strings.Contains(" Client ProblemError dataclass fields json Optional Union get_args get_origin HTTPError Request urlopen str int bool type dict isinstance super float ValueError Exception ", " "+name+" ") || s.Type != "object" || s.Ref != "" || s.AdditionalProperties == nil || *s.AdditionalProperties || len(s.Properties) == 0 {
 			return nil, fmt.Errorf("unsupported model %q", name)
 		}
 		required := map[string]bool{}
