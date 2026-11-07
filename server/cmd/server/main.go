@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/omi-teams/omi-board/server/internal/api"
 	"github.com/omi-teams/omi-board/server/internal/config"
 	"github.com/omi-teams/omi-board/server/internal/db"
 	"github.com/omi-teams/omi-board/server/internal/health"
@@ -63,6 +64,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler(pool))
+	api.HandlerFromMux(api.NewStrictHandler(api.Server{DB: pool}, nil), mux)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           mux,

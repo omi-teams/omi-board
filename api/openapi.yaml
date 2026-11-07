@@ -1,0 +1,48 @@
+openapi: 3.0.3
+info:
+  title: omi-board API
+  version: 1.0.0
+paths:
+  /v1/healthz:
+    get:
+      operationId: getV1Healthz
+      summary: Check database availability
+      responses:
+        '200':
+          description: Database available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Database unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  schemas:
+    Health:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
