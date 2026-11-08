@@ -4,10 +4,16 @@ import (
 	"context"
 	"time"
 
+	"github.com/omi-teams/omi-board/server/internal/auth"
 	"github.com/omi-teams/omi-board/server/internal/health"
 )
 
-type Server struct{ DB health.Pinger }
+type Server struct {
+	DB   health.Pinger
+	Auth *auth.Auth
+	// CookieDomain is the parent domain shared by web and API; empty makes a host-only cookie.
+	CookieDomain string
+}
 
 var _ StrictServerInterface = Server{}
 

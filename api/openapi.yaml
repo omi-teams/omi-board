@@ -20,7 +20,81 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /v1/auth/login:
+    post:
+      operationId: postV1AuthLogin
+      summary: Log in with email and password and receive the session cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in; the omi_session cookie is set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: Wrong email or password
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: Origin is not the web origin
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/auth/logout:
+    post:
+      operationId: postV1AuthLogout
+      summary: Revoke the session; send the csrf_token in the X-CSRF-Token header
+      security:
+        - cookieAuth: []
+      responses:
+        '204':
+          description: Session revoked and cookie cleared
+        '401':
+          description: No valid session
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: CSRF token missing or invalid
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /v1/auth/session:
+    get:
+      operationId: getV1AuthSession
+      summary: Return the current user and CSRF token
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Valid session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: No valid session
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: omi_session
   schemas:
     Health:
       type: object
@@ -28,6 +102,33 @@ components:
       required: [status]
       properties:
         status:
+          type: string
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+    User:
+      type: object
+      additionalProperties: false
+      required: [id, email]
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+    Session:
+      type: object
+      additionalProperties: false
+      required: [user, csrf_token]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        csrf_token:
           type: string
     Problem:
       type: object

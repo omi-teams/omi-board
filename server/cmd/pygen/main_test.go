@@ -27,7 +27,11 @@ func TestGeneration(t *testing.T) {
 	for _, tc := range []struct{ old, new string }{
 		{"type: integer", "type: number"},
 		{"type: integer", "type: integer\n          format: int64"},
-		{"get:", "post:"},
+		{"get:", "put:"},
+		{"/v1/auth/login:\n    post:", "/v1/auth/login:\n    get:"},
+		{"'204':", "'202':"},
+		{"type: apiKey", "type: http"},
+		{"- cookieAuth: []", "- missingScheme: []"},
 		{"/v1/healthz:", "/v1/{id}:"},
 		{"required: [status]", "required: [unknown]"},
 		{"operationId: getV1Healthz", "operationId: class"},

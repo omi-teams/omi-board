@@ -1,3 +1,3 @@
-from ._generated import Client, Health, Problem, ProblemError
+from ._generated import Client, Health, LoginRequest, Problem, ProblemError, Session, User
 
-__all__ = ["Client", "Health", "Problem", "ProblemError"]
+__all__ = ["Client", "Health", "LoginRequest", "Problem", "ProblemError", "Session", "User"]

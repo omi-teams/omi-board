@@ -14,9 +14,19 @@ import (
 	strictnethttp "github.com/oapi-codegen/runtime/strictmiddleware/nethttp"
 )
 
+const (
+	CookieAuthScopes = "cookieAuth.Scopes"
+)
+
 // Health defines model for Health.
 type Health struct {
 	Status string `json:"status"`
+}
+
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 // Problem defines model for Problem.
@@ -29,8 +39,32 @@ type Problem struct {
 	Type     string  `json:"type"`
 }
 
+// Session defines model for Session.
+type Session struct {
+	CsrfToken string `json:"csrf_token"`
+	User      User   `json:"user"`
+}
+
+// User defines model for User.
+type User struct {
+	Email string `json:"email"`
+	Id    int    `json:"id"`
+}
+
+// PostV1AuthLoginJSONRequestBody defines body for PostV1AuthLogin for application/json ContentType.
+type PostV1AuthLoginJSONRequestBody = LoginRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Log in with email and password and receive the session cookie
+	// (POST /v1/auth/login)
+	PostV1AuthLogin(w http.ResponseWriter, r *http.Request)
+	// Revoke the session; send the csrf_token in the X-CSRF-Token header
+	// (POST /v1/auth/logout)
+	PostV1AuthLogout(w http.ResponseWriter, r *http.Request)
+	// Return the current user and CSRF token
+	// (GET /v1/auth/session)
+	GetV1AuthSession(w http.ResponseWriter, r *http.Request)
 	// Check database availability
 	// (GET /v1/healthz)
 	GetV1Healthz(w http.ResponseWriter, r *http.Request)
@@ -44,6 +78,60 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// PostV1AuthLogin operation middleware
+func (siw *ServerInterfaceWrapper) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostV1AuthLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostV1AuthLogout operation middleware
+func (siw *ServerInterfaceWrapper) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostV1AuthLogout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetV1AuthSession operation middleware
+func (siw *ServerInterfaceWrapper) GetV1AuthSession(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, CookieAuthScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetV1AuthSession(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // GetV1Healthz operation middleware
 func (siw *ServerInterfaceWrapper) GetV1Healthz(w http.ResponseWriter, r *http.Request) {
@@ -179,9 +267,105 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 		ErrorHandlerFunc:   options.ErrorHandlerFunc,
 	}
 
+	m.HandleFunc("POST "+options.BaseURL+"/v1/auth/login", wrapper.PostV1AuthLogin)
+	m.HandleFunc("POST "+options.BaseURL+"/v1/auth/logout", wrapper.PostV1AuthLogout)
+	m.HandleFunc("GET "+options.BaseURL+"/v1/auth/session", wrapper.GetV1AuthSession)
 	m.HandleFunc("GET "+options.BaseURL+"/v1/healthz", wrapper.GetV1Healthz)
 
 	return m
+}
+
+type PostV1AuthLoginRequestObject struct {
+	Body *PostV1AuthLoginJSONRequestBody
+}
+
+type PostV1AuthLoginResponseObject interface {
+	VisitPostV1AuthLoginResponse(w http.ResponseWriter) error
+}
+
+type PostV1AuthLogin200JSONResponse Session
+
+func (response PostV1AuthLogin200JSONResponse) VisitPostV1AuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostV1AuthLogin401ApplicationProblemPlusJSONResponse Problem
+
+func (response PostV1AuthLogin401ApplicationProblemPlusJSONResponse) VisitPostV1AuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostV1AuthLogin403ApplicationProblemPlusJSONResponse Problem
+
+func (response PostV1AuthLogin403ApplicationProblemPlusJSONResponse) VisitPostV1AuthLoginResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostV1AuthLogoutRequestObject struct {
+}
+
+type PostV1AuthLogoutResponseObject interface {
+	VisitPostV1AuthLogoutResponse(w http.ResponseWriter) error
+}
+
+type PostV1AuthLogout204Response struct {
+}
+
+func (response PostV1AuthLogout204Response) VisitPostV1AuthLogoutResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type PostV1AuthLogout401ApplicationProblemPlusJSONResponse Problem
+
+func (response PostV1AuthLogout401ApplicationProblemPlusJSONResponse) VisitPostV1AuthLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type PostV1AuthLogout403ApplicationProblemPlusJSONResponse Problem
+
+func (response PostV1AuthLogout403ApplicationProblemPlusJSONResponse) VisitPostV1AuthLogoutResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(403)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetV1AuthSessionRequestObject struct {
+}
+
+type GetV1AuthSessionResponseObject interface {
+	VisitGetV1AuthSessionResponse(w http.ResponseWriter) error
+}
+
+type GetV1AuthSession200JSONResponse Session
+
+func (response GetV1AuthSession200JSONResponse) VisitGetV1AuthSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+
+	return json.NewEncoder(w).Encode(response)
+}
+
+type GetV1AuthSession401ApplicationProblemPlusJSONResponse Problem
+
+func (response GetV1AuthSession401ApplicationProblemPlusJSONResponse) VisitGetV1AuthSessionResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(401)
+
+	return json.NewEncoder(w).Encode(response)
 }
 
 type GetV1HealthzRequestObject struct {
@@ -211,6 +395,15 @@ func (response GetV1Healthz503ApplicationProblemPlusJSONResponse) VisitGetV1Heal
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// Log in with email and password and receive the session cookie
+	// (POST /v1/auth/login)
+	PostV1AuthLogin(ctx context.Context, request PostV1AuthLoginRequestObject) (PostV1AuthLoginResponseObject, error)
+	// Revoke the session; send the csrf_token in the X-CSRF-Token header
+	// (POST /v1/auth/logout)
+	PostV1AuthLogout(ctx context.Context, request PostV1AuthLogoutRequestObject) (PostV1AuthLogoutResponseObject, error)
+	// Return the current user and CSRF token
+	// (GET /v1/auth/session)
+	GetV1AuthSession(ctx context.Context, request GetV1AuthSessionRequestObject) (GetV1AuthSessionResponseObject, error)
 	// Check database availability
 	// (GET /v1/healthz)
 	GetV1Healthz(ctx context.Context, request GetV1HealthzRequestObject) (GetV1HealthzResponseObject, error)
@@ -243,6 +436,85 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// PostV1AuthLogin operation middleware
+func (sh *strictHandler) PostV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+	var request PostV1AuthLoginRequestObject
+
+	var body PostV1AuthLoginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PostV1AuthLogin(ctx, request.(PostV1AuthLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostV1AuthLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PostV1AuthLoginResponseObject); ok {
+		if err := validResponse.VisitPostV1AuthLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PostV1AuthLogout operation middleware
+func (sh *strictHandler) PostV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+	var request PostV1AuthLogoutRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PostV1AuthLogout(ctx, request.(PostV1AuthLogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PostV1AuthLogout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PostV1AuthLogoutResponseObject); ok {
+		if err := validResponse.VisitPostV1AuthLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetV1AuthSession operation middleware
+func (sh *strictHandler) GetV1AuthSession(w http.ResponseWriter, r *http.Request) {
+	var request GetV1AuthSessionRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetV1AuthSession(ctx, request.(GetV1AuthSessionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetV1AuthSession")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetV1AuthSessionResponseObject); ok {
+		if err := validResponse.VisitGetV1AuthSessionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // GetV1Healthz operation middleware

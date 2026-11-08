@@ -23,6 +23,9 @@ func TestLoad(t *testing.T) {
 		{"short secret", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": "short"}, true, ""},
 		{"bad port", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "PORT": "abc"}, true, ""},
 		{"bad web url", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "PUBLIC_WEB_URL": "nope"}, true, ""},
+		{"good cookie domain", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "COOKIE_DOMAIN": "example.com"}, false, "8080"},
+		{"cookie domain with scheme", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "COOKIE_DOMAIN": "https://example.com"}, true, ""},
+		{"cookie domain with port", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "COOKIE_DOMAIN": "example.com:443"}, true, ""},
 		{"good web url", map[string]string{"DATABASE_URL": "postgres://x", "SESSION_SECRET": secret, "PUBLIC_WEB_URL": "http://localhost:3000"}, false, "8080"},
 	}
 	for _, tt := range tests {
