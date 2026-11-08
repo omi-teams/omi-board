@@ -5,17 +5,21 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/getsentry/sentry-go"
 
 	"github.com/omi-teams/omi-board/server/internal/api"
+	"github.com/omi-teams/omi-board/server/internal/auth"
 	"github.com/omi-teams/omi-board/server/internal/config"
 	"github.com/omi-teams/omi-board/server/internal/db"
 	"github.com/omi-teams/omi-board/server/internal/health"
@@ -48,8 +52,11 @@ func mainExit() int {
 		defer reporter.Flush(2 * time.Second)
 	}
 	run := func() error { return run(reporter) }
-	if flag.Arg(0) == "migrate" {
+	switch flag.Arg(0) {
+	case "migrate":
 		run = migrate
+	case "create-user":
+		run = func() error { return createUser(flag.Arg(1), os.Stdin) }
 	}
 	if err := run(); err != nil {
 		obs.Capture(reporter, err, "")
@@ -74,6 +81,41 @@ func migrate() error {
 		return err
 	}
 	slog.Info("migrations applied", "migrations", applied)
+	return nil
+}
+
+// minPasswordLen is checked only here: create-user is the only way to add users.
+const minPasswordLen = 8
+
+// createUser adds a user with the email argument and the password read from stdin
+// (one line, so it never appears in the process list or shell history). It needs only DATABASE_URL.
+func createUser(email string, stdin io.Reader) error {
+	if email == "" {
+		return errors.New("usage: server create-user <email> < password-file")
+	}
+	line, err := io.ReadAll(io.LimitReader(stdin, 1<<16))
+	if err != nil {
+		return err
+	}
+	password := strings.TrimRight(string(line), "\r\n")
+	if len(password) < minPasswordLen {
+		return fmt.Errorf("password on stdin must be at least %d characters", minPasswordLen)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	pool, err := db.Open(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	if _, err := db.Migrate(ctx, pool, migrations.FS); err != nil {
+		return err
+	}
+	user, err := auth.Store{DB: pool}.CreateUser(ctx, email, password)
+	if err != nil {
+		return err
+	}
+	slog.Info("user created", "id", user.ID)
 	return nil
 }
 
@@ -109,10 +151,12 @@ func run(reporter *sentry.Client) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler(pool))
-	api.HandlerFromMux(api.NewStrictHandler(api.Server{DB: pool}, nil), mux)
+	authn := auth.New(pool, cfg.SessionSecret, cfg.PublicWebURL)
+	server := api.Server{DB: pool, Auth: authn, CookieDomain: cfg.CookieDomain}
+	api.HandlerFromMux(api.NewStrictHandlerWithOptions(server, nil, api.ErrorHandlers()), mux)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           obs.Middleware(slog.Default(), reporter, mux),
+		Handler:           obs.Middleware(slog.Default(), reporter, authn.Middleware(mux)),
 		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

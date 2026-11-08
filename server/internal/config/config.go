@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 )
+
+var cookieDomain = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$`)
 
 const minSecretBytes = 32
 
@@ -16,6 +19,8 @@ type Config struct {
 	Port          string
 	PublicWebURL  string
 	SessionSecret string
+	// CookieDomain is the parent domain of the session cookie (for example example.com); empty means host-only.
+	CookieDomain string
 }
 
 // Load builds a Config using get to look up variables (os.Getenv in production).
@@ -25,6 +30,7 @@ func Load(get func(string) string) (Config, error) {
 		Port:          get("PORT"),
 		PublicWebURL:  get("PUBLIC_WEB_URL"),
 		SessionSecret: get("SESSION_SECRET"),
+		CookieDomain:  get("COOKIE_DOMAIN"),
 	}
 	if c.Port == "" {
 		c.Port = "8080"
@@ -42,6 +48,9 @@ func Load(get func(string) string) (Config, error) {
 	}
 	if len(c.SessionSecret) < minSecretBytes {
 		return Config{}, fmt.Errorf("SESSION_SECRET must be at least %d bytes", minSecretBytes)
+	}
+	if c.CookieDomain != "" && !cookieDomain.MatchString(c.CookieDomain) {
+		return Config{}, fmt.Errorf("COOKIE_DOMAIN %q is not a bare domain name", c.CookieDomain)
 	}
 	return c, nil
 }
