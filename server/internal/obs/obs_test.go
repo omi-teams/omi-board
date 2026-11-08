@@ -2,8 +2,10 @@ package obs
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/getsentry/sentry-go"
 )
 
 func TestAccessLog(t *testing.T) {
@@ -136,5 +140,115 @@ func TestSentryReportsErrors(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatal("no event received")
 		}
+	}
+}
+
+// Capture the final SDK event at the transport boundary, including integrations.
+type capturingTransport struct {
+	events []*sentry.Event
+}
+
+func (t *capturingTransport) Configure(sentry.ClientOptions) {}
+func (t *capturingTransport) SendEvent(event *sentry.Event) {
+	t.events = append(t.events, event)
+}
+func (t *capturingTransport) Flush(time.Duration) bool              { return true }
+func (t *capturingTransport) FlushWithContext(context.Context) bool { return true }
+func (t *capturingTransport) Close()                                {}
+
+func newCapturingReporter(t *testing.T) (*sentry.Client, *capturingTransport) {
+	t.Helper()
+	transport := &capturingTransport{}
+	client, err := sentry.NewClient(sentry.ClientOptions{
+		Dsn: "https://public@example.com/1", Transport: transport,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client, transport
+}
+
+func TestSentryEventsExcludeSecrets(t *testing.T) {
+	const secret = "postgres://u:p4ss@h/db"
+	const rawError = "database connection failed: " + secret
+	for _, tc := range []struct {
+		name, message, typeName string
+		run                     func(*testing.T, *sentry.Client) string
+	}{
+		{"error", "server error", "*errors.errorString", func(t *testing.T, client *sentry.Client) string {
+			Capture(client, errors.New(rawError), "test-id")
+			return "test-id"
+		}},
+		{"wrapped error", "server error", "*errors.errorString", func(t *testing.T, client *sentry.Client) string {
+			Capture(client, fmt.Errorf("wrapper-secret: %w", errors.New(rawError)), "test-id")
+			return "test-id"
+		}},
+		{"panic string", "handler panic", "string", func(t *testing.T, client *sentry.Client) string {
+			h := Middleware(Logger(io.Discard), client, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				panic(secret)
+			}))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("GET", "/?token=request-secret", nil))
+			if w.Code != http.StatusInternalServerError {
+				t.Fatalf("panic status = %d", w.Code)
+			}
+			return w.Header().Get("X-Request-ID")
+		}},
+		{"panic error", "handler panic", "*errors.errorString", func(t *testing.T, client *sentry.Client) string {
+			h := Middleware(Logger(io.Discard), client, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				panic(errors.New(rawError))
+			}))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+			return w.Header().Get("X-Request-ID")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client, transport := newCapturingReporter(t)
+			id := tc.run(t, client)
+			if len(transport.events) != 1 {
+				t.Fatalf("events = %d", len(transport.events))
+			}
+			event := transport.events[0]
+			body, err := json.Marshal(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, sensitive := range []string{secret, "p4ss", rawError, "wrapper-secret", "request-secret"} {
+				if bytes.Contains(body, []byte(sensitive)) {
+					t.Fatalf("sensitive data in event: %s", body)
+				}
+			}
+			if event.Message != tc.message || len(event.Exception) != 1 ||
+				event.Exception[0].Type != tc.typeName || event.Exception[0].Value != "" {
+				t.Fatalf("unexpected event: %s", body)
+			}
+			if id == "" || event.Tags["request_id"] != id {
+				t.Fatalf("request ID missing: %s", body)
+			}
+		})
+	}
+}
+
+func TestMiddlewareRepanicsErrAbortHandler(t *testing.T) {
+	client, transport := newCapturingReporter(t)
+	var log bytes.Buffer
+	h := Middleware(Logger(&log), client, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	}))
+	w := httptest.NewRecorder()
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	}()
+	if recovered != http.ErrAbortHandler {
+		t.Fatalf("recovered = %v, want http.ErrAbortHandler", recovered)
+	}
+	if w.Code != http.StatusOK || w.Body.Len() != 0 || w.Flushed {
+		t.Fatalf("abort wrote response: %+v", w)
+	}
+	if len(transport.events) != 0 || log.Len() != 0 {
+		t.Fatalf("abort reported %d events and log %q", len(transport.events), log.String())
 	}
 }
