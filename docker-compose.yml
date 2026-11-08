@@ -22,6 +22,7 @@ services:
       PORT: ${PORT:-8080}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
       SESSION_SECRET: ${SESSION_SECRET:-dev-only-session-secret-change-me-0123456789}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "8080:${PORT:-8080}"
   web:
@@ -33,5 +34,6 @@ services:
     environment:
       PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:3000}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "3000:3000"

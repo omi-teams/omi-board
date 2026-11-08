@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -13,14 +13,22 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/getsentry/sentry-go"
+
 	"github.com/omi-teams/omi-board/server/internal/api"
 	"github.com/omi-teams/omi-board/server/internal/config"
 	"github.com/omi-teams/omi-board/server/internal/db"
 	"github.com/omi-teams/omi-board/server/internal/health"
+	"github.com/omi-teams/omi-board/server/internal/obs"
 	"github.com/omi-teams/omi-board/server/migrations"
 )
 
 func main() {
+	os.Exit(mainExit())
+}
+
+func mainExit() int {
+	slog.SetDefault(obs.Logger(os.Stdout))
 	healthcheck := flag.Bool("healthcheck", false, "probe the local /healthz endpoint and exit")
 	flag.Parse()
 
@@ -29,15 +37,27 @@ func main() {
 		port = "8080"
 	}
 	if *healthcheck {
-		os.Exit(probe(port))
+		return probe(port)
 	}
-	run := run
+	reporter, err := obs.NewReporter(os.Getenv("SENTRY_DSN"))
+	if err != nil {
+		slog.Error("invalid SENTRY_DSN")
+		return 1
+	}
+	if reporter != nil {
+		defer reporter.Flush(2 * time.Second)
+	}
+	run := func() error { return run(reporter) }
 	if flag.Arg(0) == "migrate" {
 		run = migrate
 	}
 	if err := run(); err != nil {
-		log.Fatal(err)
+		obs.Capture(reporter, err, "")
+		// Configuration/database errors can contain credentials; keep them out of logs.
+		slog.Error("server command failed")
+		return 1
 	}
+	return 0
 }
 
 // migrate applies pending migrations and exits; it needs only DATABASE_URL.
@@ -53,7 +73,7 @@ func migrate() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("migrations applied: %v", applied)
+	slog.Info("migrations applied", "migrations", applied)
 	return nil
 }
 
@@ -70,7 +90,7 @@ func probe(port string) int {
 	return 0
 }
 
-func run() error {
+func run(reporter *sentry.Client) error {
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		return err
@@ -92,7 +112,8 @@ func run() error {
 	api.HandlerFromMux(api.NewStrictHandler(api.Server{DB: pool}, nil), mux)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           mux,
+		Handler:           obs.Middleware(slog.Default(), reporter, mux),
+		ErrorLog:          slog.NewLogLogger(slog.Default().Handler(), slog.LevelError),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
@@ -101,7 +122,7 @@ func run() error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	log.Printf("listening on %s", srv.Addr)
+	slog.Info("listening", "address", srv.Addr)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
