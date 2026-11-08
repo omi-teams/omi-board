@@ -17,6 +17,7 @@ import (
 	"github.com/omi-teams/omi-board/server/internal/config"
 	"github.com/omi-teams/omi-board/server/internal/db"
 	"github.com/omi-teams/omi-board/server/internal/health"
+	"github.com/omi-teams/omi-board/server/migrations"
 )
 
 func main() {
@@ -30,9 +31,30 @@ func main() {
 	if *healthcheck {
 		os.Exit(probe(port))
 	}
+	run := run
+	if flag.Arg(0) == "migrate" {
+		run = migrate
+	}
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// migrate applies pending migrations and exits; it needs only DATABASE_URL.
+func migrate() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	pool, err := db.Open(ctx, os.Getenv("DATABASE_URL"))
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	applied, err := db.Migrate(ctx, pool, migrations.FS)
+	if err != nil {
+		return err
+	}
+	log.Printf("migrations applied: %v", applied)
+	return nil
 }
 
 func probe(port string) int {
@@ -61,6 +83,9 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+	if _, err := db.Migrate(ctx, pool, migrations.FS); err != nil {
+		return err
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", health.Handler(pool))

@@ -1,0 +1,1 @@
+-- Baseline: intentionally empty. The first schema arrives in a later migration.
