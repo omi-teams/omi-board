@@ -4,10 +4,12 @@ package obs
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/getsentry/sentry-go"
@@ -37,11 +39,30 @@ func Capture(client *sentry.Client, err error, requestID string) {
 	if client == nil {
 		return
 	}
-	scope := sentry.NewScope()
-	if requestID != "" {
-		scope.SetTag("request_id", requestID)
+	for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(err) {
+		err = cause
 	}
-	client.CaptureException(err, nil, scope)
+	capture(client, "server error", fmt.Sprintf("%T", err), requestID, nil)
+}
+
+// Build events from an allowlist: error and panic values may contain secrets.
+func capture(client *sentry.Client, message, typeName, requestID string, tags map[string]string) {
+	if client == nil {
+		return
+	}
+	event := sentry.NewEvent()
+	event.Level = sentry.LevelError
+	event.Message = message
+	if typeName != "" {
+		event.Exception = []sentry.Exception{{Type: typeName}}
+	}
+	if tags != nil {
+		event.Tags = tags
+	}
+	if requestID != "" {
+		event.Tags["request_id"] = requestID
+	}
+	client.CaptureEvent(event, nil, sentry.NewScope())
 }
 
 // Middleware logs only an allowlist of fields. Bodies, query strings, headers,
@@ -56,12 +77,15 @@ func Middleware(logger *slog.Logger, client *sentry.Client, next http.Handler) h
 		response := &responseWriter{ResponseWriter: w}
 		defer func() {
 			if recovered := recover(); recovered != nil {
-				Capture(client, fmt.Errorf("handler panic: %v", recovered), id)
+				if recovered == http.ErrAbortHandler {
+					panic(recovered)
+				}
+				capture(client, "handler panic", fmt.Sprintf("%T", recovered), id, nil)
 				if response.status == 0 {
 					http.Error(response, "Internal Server Error", http.StatusInternalServerError)
 				}
 			} else if response.status >= 500 {
-				Capture(client, fmt.Errorf("HTTP %d", response.status), id)
+				capture(client, "HTTP 5xx", "", id, map[string]string{"status": strconv.Itoa(response.status)})
 			}
 			status := response.status
 			if status == 0 {
